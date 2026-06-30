@@ -1,0 +1,99 @@
+name: Database Reset
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [dev, prod]
+        default: dev
+      confirm:
+        description: 'Type the environment name to confirm (e.g. "dev" or "prod")'
+        required: true
+        type: string
+
+jobs:
+  validate:
+    name: Validate Confirmation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation matches environment
+        run: |
+          if [ "${{ inputs.confirm }}" != "${{ inputs.environment }}" ]; then
+            echo "Confirmation mismatch: expected '${{ inputs.environment }}', got '${{ inputs.confirm }}'"
+            exit 1
+          fi
+
+  reset-and-seed:
+    name: DB Reset
+    runs-on: ubuntu-latest
+    needs: validate
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: vars
+        run: |
+          TFVARS="terraform/environments/${{ inputs.environment }}.tfvars"
+          APP_NAME=$(grep '^app_name' $TFVARS | cut -d'"' -f2)
+          PROJECT_ID=$(grep '^project_id' $TFVARS | cut -d'"' -f2)
+          REGION=$(grep '^region' $TFVARS | cut -d'"' -f2)
+          DB_NAME=$(grep '^db_name' $TFVARS | cut -d'"' -f2)
+          echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
+          echo "project_id=$PROJECT_ID" >> $GITHUB_OUTPUT
+          echo "region=$REGION" >> $GITHUB_OUTPUT
+          echo "db_name=$DB_NAME" >> $GITHUB_OUTPUT
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ steps.vars.outputs.project_id }}-tf-state" \
+            -backend-config="prefix=${{ steps.vars.outputs.app_name }}/${{ inputs.environment }}"
+
+      - name: Get DB credentials
+        id: get-db
+        working-directory: terraform
+        run: |
+          DB_PASS=$(gcloud secrets versions access latest \
+            --secret="db-password-${{ inputs.environment }}" \
+            --project="${{ steps.vars.outputs.project_id }}")
+          echo "::add-mask::$DB_PASS"
+          echo "db_password=$DB_PASS" >> $GITHUB_OUTPUT
+          echo "db_connection_name=$(terraform output -raw db_connection_name)" >> $GITHUB_OUTPUT
+
+      - name: Install Cloud SQL Auth Proxy
+        run: |
+          curl -fsSL -o /usr/local/bin/cloud-sql-proxy \
+            https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.14.2/cloud-sql-proxy.linux.amd64
+          chmod +x /usr/local/bin/cloud-sql-proxy
+
+      - name: DB Reset
+        working-directory: backend
+        env:
+          DB_PASS: ${{ steps.get-db.outputs.db_password }}
+          DB_CONN: ${{ steps.get-db.outputs.db_connection_name }}
+          DB_NAME: ${{ steps.vars.outputs.db_name }}
+        run: |
+          cloud-sql-proxy "$DB_CONN" --port=5432 &
+          PROXY_PID=$!
+          trap "kill $PROXY_PID 2>/dev/null || true" EXIT
+          sleep 4
+          npm ci --ignore-scripts
+          DB_PASS_ENC=$(node -e "process.stdout.write(encodeURIComponent(process.env.DB_PASS))")
+          export DATABASE_URL="postgresql://app:${DB_PASS_ENC}@localhost:5432/${DB_NAME}?schema=public"
+          npx prisma migrate reset --force --skip-seed
+          # npx prisma generate
+          # npm run seed

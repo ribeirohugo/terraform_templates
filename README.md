@@ -39,8 +39,12 @@ See `variables.tf` for the full list and defaults.
 
 ---
 
-### [`web_application`](web_application/README.md) — GCP Web App + CI/CD
+### [`web_application_wif`](web_application_wif/README.md) — GCP Web App + CI/CD (Workload Identity Federation)
 
-Same GCP infrastructure as above plus GitHub Actions workflows for CI, deployment, and database management.
+Same GCP infrastructure as above plus GitHub Actions workflows, authenticated via **Workload Identity Federation** — keyless, no long-lived credentials stored in GitHub.
 
-Each template folder has its own `README.md` with setup instructions and a `PROMPTS.md` with ready-to-paste prompts for common extensions.
+### [`web_application_gcp_sa_key`](web_application_gcp_sa_key/README.md) — GCP Web App + CI/CD (Service Account Key)
+
+Same GCP infrastructure as above plus GitHub Actions workflows, authenticated via a **GCP Service Account JSON key** stored as a GitHub secret (`GCP_SA_KEY`). Simpler to set up, but requires managing key rotation.
+
+Each template folder has its own `README.md` with setup instructions.

@@ -1,15 +1,15 @@
-# Application Template
+# Web Application Template — GCP SA Key
 
-Startup template for web applications deployed on **Google Cloud Run** with **PostgreSQL (Cloud SQL)**, **GCS storage**, and **GitHub Actions CI/CD** via **Workload Identity Federation**.
+Startup template for web applications deployed on **Google Cloud Run** with **PostgreSQL (Cloud SQL)**, **GCS storage**, and **GitHub Actions CI/CD** authenticated via a **GCP Service Account Key** (`GCP_SA_KEY`).
 
 ## Structure
 
 ```
-web_application/
+web_application_gcp_sa_key/
 ├── terraform_template/          # GCP infrastructure
-│   ├── main.tf                  # Resources: WIF, Cloud Run, Cloud SQL, GCS, Artifact Registry
+│   ├── main.tf                  # Resources: Cloud Run, Cloud SQL, GCS, Artifact Registry
 │   ├── variables.tf             # All input variables
-│   ├── outputs.tf               # Key outputs (URLs, SA emails, registry path)
+│   ├── outputs.tf               # Key outputs (URLs, SA email, registry path)
 │   └── environments/
 │       ├── dev.tfvars           # Dev environment values
 │       └── prod.tfvars          # Prod environment values
@@ -44,7 +44,6 @@ Edit `terraform/environments/dev.tfvars` (and `prod.tfvars`) replacing all place
 | Field | Description |
 |---|---|
 | `app_name` | Short name used for all resource names (e.g. `my-app`) |
-| `github_repository` | `owner/repo` format |
 | `project_id` | Your GCP project ID |
 | `region` | GCP region (default `europe-west1`) |
 | `backend_image` / `frontend_image` | Initial placeholder image references |
@@ -55,21 +54,20 @@ Edit `terraform/environments/dev.tfvars` (and `prod.tfvars`) replacing all place
 
 Run the initial `terraform init` locally or let the `deploy.yml` workflow handle it. The state bucket is created automatically on first run.
 
-### 4. Add GitHub repository variables and secrets
+### 4. Create the service account key and add GitHub secrets
 
-After the first `terraform apply`, grab the outputs and configure:
+After the first `terraform apply`, create a key for the GitHub Actions service account:
 
-**Variables** (`Settings → Secrets and variables → Actions → Variables`):
+```bash
+SA_EMAIL=$(terraform output -raw github_actions_service_account)
+gcloud iam service-accounts keys create sa-key.json --iam-account="$SA_EMAIL"
+```
 
-| Name | Value |
-|---|---|
-| `WIF_PROVIDER` | `terraform output workload_identity_provider` |
-| `WIF_SERVICE_ACCOUNT` | `terraform output github_actions_service_account` |
-
-**Secrets** (`Settings → Secrets and variables → Actions → Secrets`):
+Then add the following under `Settings → Secrets and variables → Actions → Secrets`:
 
 | Name | Description |
 |---|---|
+| `GCP_SA_KEY` | Contents of `sa-key.json` (the full JSON) |
 | `JWT_SECRET` | JWT signing key for the backend |
 
 Add any additional application secrets here and reference them in the `Terraform Apply` steps inside `deploy.yml` and `destroy.yml`.
@@ -96,7 +94,6 @@ Add any additional application secrets here and reference them in the `Terraform
 
 ## Infrastructure created
 
-- **Workload Identity Federation** — keyless GCP auth for GitHub Actions
 - **Artifact Registry** — Docker image storage
 - **Cloud SQL (PostgreSQL 17)** — managed database
 - **GCS bucket** — file/object storage
