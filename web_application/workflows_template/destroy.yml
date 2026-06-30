@@ -1,0 +1,92 @@
+name: Destroy
+run-name: Destroy ${{ inputs.environment }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [dev, prod]
+        default: dev
+      confirm:
+        description: 'Type the environment name to confirm destruction (e.g. "dev")'
+        required: true
+
+jobs:
+  validate:
+    name: Validate Confirmation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation matches environment
+        run: |
+          if [ "${{ inputs.confirm }}" != "${{ inputs.environment }}" ]; then
+            echo "Confirmation '${{ inputs.confirm }}' does not match environment '${{ inputs.environment }}'"
+            exit 1
+          fi
+
+  destroy:
+    name: Destroy Infrastructure
+    runs-on: ubuntu-latest
+    needs: validate
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read environment config
+        id: vars
+        run: |
+          TFVARS="terraform/environments/${{ inputs.environment }}.tfvars"
+          APP_NAME=$(grep '^app_name' $TFVARS | cut -d'"' -f2)
+          PROJECT_ID=$(grep '^project_id' $TFVARS | cut -d'"' -f2)
+          REGION=$(grep '^region' $TFVARS | cut -d'"' -f2)
+          echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
+          echo "project_id=$PROJECT_ID" >> $GITHUB_OUTPUT
+          echo "region=$REGION" >> $GITHUB_OUTPUT
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ steps.vars.outputs.project_id }}-tf-state" \
+            -backend-config="prefix=${{ steps.vars.outputs.app_name }}/${{ inputs.environment }}"
+
+      - name: Purge Artifact Registry
+        # terraform destroy fails on non-empty repositories — delete images first
+        run: |
+          gcloud artifacts repositories delete ${{ steps.vars.outputs.app_name }} \
+            --location="${{ steps.vars.outputs.region }}" \
+            --project="${{ steps.vars.outputs.project_id }}" \
+            --quiet 2>/dev/null || true
+        continue-on-error: true
+
+      - name: Remove registry from Terraform state
+        working-directory: terraform
+        run: terraform state rm google_artifact_registry_repository.main 2>/dev/null || true
+
+      - name: Terraform Destroy
+        working-directory: terraform
+        env:
+          TF_IN_AUTOMATION: "true"
+        run: |
+          terraform destroy -auto-approve \
+            -var-file="environments/${{ inputs.environment }}.tfvars" \
+            -var="backend_image=unused" \
+            -var="frontend_image=unused" \
+            -var="jwt_secret=${{ secrets.JWT_SECRET || 'unused' }}"
+            # Add extra -var flags here for any application-specific secrets.
