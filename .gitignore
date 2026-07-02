@@ -19,6 +19,10 @@ crash.*.log
 *.tfvars
 *.tfvars.json
 
+# Except the template placeholder tfvars files, which are meant to be committed
+# and edited by whoever copies a template (see each template's README).
+!**/terraform_template/environments/*.tfvars
+
 # Ignore override files as they are usually used to override resources locally and so
 # are not checked in
 override.tf
