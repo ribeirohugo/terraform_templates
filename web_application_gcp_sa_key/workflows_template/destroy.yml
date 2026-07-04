@@ -39,10 +39,8 @@ jobs:
         run: |
           TFVARS="terraform/environments/${{ inputs.environment }}.tfvars"
           APP_NAME=$(grep '^app_name' $TFVARS | cut -d'"' -f2)
-          PROJECT_ID=$(grep '^project_id' $TFVARS | cut -d'"' -f2)
           REGION=$(grep '^region' $TFVARS | cut -d'"' -f2)
           echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
-          echo "project_id=$PROJECT_ID" >> $GITHUB_OUTPUT
           echo "region=$REGION" >> $GITHUB_OUTPUT
 
       - name: Authenticate to GCP
@@ -61,7 +59,7 @@ jobs:
         working-directory: terraform
         run: |
           terraform init \
-            -backend-config="bucket=${{ steps.vars.outputs.project_id }}-tf-state" \
+            -backend-config="bucket=${{ vars.GCP_PROJECT_ID }}-tf-state" \
             -backend-config="prefix=${{ steps.vars.outputs.app_name }}/${{ inputs.environment }}"
 
       - name: Purge Artifact Registry
@@ -69,7 +67,7 @@ jobs:
         run: |
           gcloud artifacts repositories delete ${{ steps.vars.outputs.app_name }} \
             --location="${{ steps.vars.outputs.region }}" \
-            --project="${{ steps.vars.outputs.project_id }}" \
+            --project="${{ vars.GCP_PROJECT_ID }}" \
             --quiet 2>/dev/null || true
         continue-on-error: true
 
@@ -84,6 +82,7 @@ jobs:
         run: |
           terraform destroy -auto-approve \
             -var-file="environments/${{ inputs.environment }}.tfvars" \
+            -var="project_id=${{ vars.GCP_PROJECT_ID }}" \
             -var="backend_image=unused" \
             -var="frontend_image=unused" \
             -var="jwt_secret=${{ secrets.JWT_SECRET || 'unused' }}"

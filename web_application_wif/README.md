@@ -45,7 +45,6 @@ Edit `terraform/environments/dev.tfvars` (and `prod.tfvars`) replacing all place
 |---|---|
 | `app_name` | Short name used for all resource names (e.g. `my-app`) |
 | `github_repository` | `owner/repo` format — scopes the WIF trust to your repo |
-| `project_id` | Your GCP project ID |
 | `region` | GCP region (default `europe-west1`) |
 | `backend_image` / `frontend_image` | Initial placeholder image references |
 | `db_name` | PostgreSQL database name (default `app`) |
@@ -53,7 +52,7 @@ Edit `terraform/environments/dev.tfvars` (and `prod.tfvars`) replacing all place
 
 ### 3. Bootstrap Terraform (first deploy only)
 
-Run the initial `terraform init` locally or let the `deploy.yml` workflow handle it. The state bucket is created automatically on first run.
+Run the initial `terraform init` locally or let the `deploy.yml` workflow handle it. The state bucket is created automatically on first run. `project_id` isn't in the tfvars — pass it explicitly, e.g. `terraform apply -var-file=environments/dev.tfvars -var="project_id=your-gcp-project-id"`.
 
 ### 4. Add GitHub repository variables and secrets
 
@@ -63,6 +62,7 @@ After the first `terraform apply`, grab the outputs and configure:
 
 | Name | Value |
 |---|---|
+| `GCP_PROJECT_ID` | Your GCP project ID |
 | `WIF_PROVIDER` | `terraform output workload_identity_provider` |
 | `WIF_SERVICE_ACCOUNT` | `terraform output github_actions_service_account` |
 

@@ -1,5 +1,4 @@
 app_name   = "your-app-name"
-project_id  = "your-gcp-project-id"
 region      = "europe-west1"
 environment = "prod"
 

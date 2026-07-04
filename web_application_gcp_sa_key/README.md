@@ -44,7 +44,6 @@ Edit `terraform/environments/dev.tfvars` (and `prod.tfvars`) replacing all place
 | Field | Description |
 |---|---|
 | `app_name` | Short name used for all resource names (e.g. `my-app`) |
-| `project_id` | Your GCP project ID |
 | `region` | GCP region (default `europe-west1`) |
 | `backend_image` / `frontend_image` | Initial placeholder image references |
 | `db_name` | PostgreSQL database name (default `app`) |
@@ -52,7 +51,7 @@ Edit `terraform/environments/dev.tfvars` (and `prod.tfvars`) replacing all place
 
 ### 3. Bootstrap Terraform (first deploy only)
 
-Run the initial `terraform init` locally or let the `deploy.yml` workflow handle it. The state bucket is created automatically on first run.
+Run the initial `terraform init` locally or let the `deploy.yml` workflow handle it. The state bucket is created automatically on first run. `project_id` isn't in the tfvars — pass it explicitly, e.g. `terraform apply -var-file=environments/dev.tfvars -var="project_id=your-gcp-project-id"`.
 
 ### 4. Create the service account key and add GitHub secrets
 
@@ -62,6 +61,12 @@ After the first `terraform apply`, create a key for the GitHub Actions service a
 SA_EMAIL=$(terraform output -raw github_actions_service_account)
 gcloud iam service-accounts keys create sa-key.json --iam-account="$SA_EMAIL"
 ```
+
+Add the following under `Settings → Secrets and variables → Actions → Variables`:
+
+| Name | Value |
+|---|---|
+| `GCP_PROJECT_ID` | Your GCP project ID |
 
 Then add the following under `Settings → Secrets and variables → Actions → Secrets`:
 

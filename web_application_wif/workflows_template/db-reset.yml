@@ -39,11 +39,9 @@ jobs:
         run: |
           TFVARS="terraform/environments/${{ inputs.environment }}.tfvars"
           APP_NAME=$(grep '^app_name' $TFVARS | cut -d'"' -f2)
-          PROJECT_ID=$(grep '^project_id' $TFVARS | cut -d'"' -f2)
           REGION=$(grep '^region' $TFVARS | cut -d'"' -f2)
           DB_NAME=$(grep '^db_name' $TFVARS | cut -d'"' -f2)
           echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
-          echo "project_id=$PROJECT_ID" >> $GITHUB_OUTPUT
           echo "region=$REGION" >> $GITHUB_OUTPUT
           echo "db_name=$DB_NAME" >> $GITHUB_OUTPUT
 
@@ -62,7 +60,7 @@ jobs:
         working-directory: terraform
         run: |
           terraform init \
-            -backend-config="bucket=${{ steps.vars.outputs.project_id }}-tf-state" \
+            -backend-config="bucket=${{ vars.GCP_PROJECT_ID }}-tf-state" \
             -backend-config="prefix=${{ steps.vars.outputs.app_name }}/${{ inputs.environment }}"
 
       - name: Get DB credentials
@@ -71,7 +69,7 @@ jobs:
         run: |
           DB_PASS=$(gcloud secrets versions access latest \
             --secret="db-password-${{ inputs.environment }}" \
-            --project="${{ steps.vars.outputs.project_id }}")
+            --project="${{ vars.GCP_PROJECT_ID }}")
           echo "::add-mask::$DB_PASS"
           echo "db_password=$DB_PASS" >> $GITHUB_OUTPUT
           echo "db_connection_name=$(terraform output -raw db_connection_name)" >> $GITHUB_OUTPUT

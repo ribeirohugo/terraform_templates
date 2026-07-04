@@ -17,7 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       app_name: ${{ steps.vars.outputs.app_name }}
-      project_id: ${{ steps.vars.outputs.project_id }}
       region: ${{ steps.vars.outputs.region }}
       registry: ${{ steps.vars.outputs.registry }}
     steps:
@@ -27,12 +26,10 @@ jobs:
         run: |
           TFVARS="terraform/environments/${{ inputs.environment }}.tfvars"
           APP_NAME=$(grep '^app_name' $TFVARS | cut -d'"' -f2)
-          PROJECT_ID=$(grep '^project_id' $TFVARS | cut -d'"' -f2)
           REGION=$(grep '^region' $TFVARS | cut -d'"' -f2)
           echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
-          echo "project_id=$PROJECT_ID" >> $GITHUB_OUTPUT
           echo "region=$REGION" >> $GITHUB_OUTPUT
-          echo "registry=${REGION}-docker.pkg.dev/${PROJECT_ID}/${APP_NAME}" >> $GITHUB_OUTPUT
+          echo "registry=${REGION}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${APP_NAME}" >> $GITHUB_OUTPUT
 
   provision:
     name: Provision Infrastructure
@@ -57,8 +54,8 @@ jobs:
 
       - name: Create State Bucket
         run: |
-          gcloud storage buckets create gs://${{ needs.setup.outputs.project_id }}-tf-state \
-            --project=${{ needs.setup.outputs.project_id }} \
+          gcloud storage buckets create gs://${{ vars.GCP_PROJECT_ID }}-tf-state \
+            --project=${{ vars.GCP_PROJECT_ID }} \
             --location=${{ needs.setup.outputs.region }} \
             --uniform-bucket-level-access 2>/dev/null || true
 
@@ -66,7 +63,7 @@ jobs:
         working-directory: terraform
         run: |
           terraform init \
-            -backend-config="bucket=${{ needs.setup.outputs.project_id }}-tf-state" \
+            -backend-config="bucket=${{ vars.GCP_PROJECT_ID }}-tf-state" \
             -backend-config="prefix=${{ needs.setup.outputs.app_name }}/${{ inputs.environment }}"
 
       - name: Terraform Apply (APIs + Registry)
@@ -77,7 +74,8 @@ jobs:
           terraform apply -auto-approve \
             -target=google_project_service.apis \
             -target=google_artifact_registry_repository.main \
-            -var-file="environments/${{ inputs.environment }}.tfvars"
+            -var-file="environments/${{ inputs.environment }}.tfvars" \
+            -var="project_id=${{ vars.GCP_PROJECT_ID }}"
 
   build-backend:
     name: Build & Push Backend
@@ -143,19 +141,19 @@ jobs:
         working-directory: terraform
         run: |
           terraform init \
-            -backend-config="bucket=${{ needs.setup.outputs.project_id }}-tf-state" \
+            -backend-config="bucket=${{ vars.GCP_PROJECT_ID }}-tf-state" \
             -backend-config="prefix=${{ needs.setup.outputs.app_name }}/${{ inputs.environment }}"
 
       - name: Restore WIF pool if needed
         working-directory: terraform
         run: |
-          PROJECT_ID="${{ needs.setup.outputs.project_id }}"
+          PROJECT_ID="${{ vars.GCP_PROJECT_ID }}"
           POOL_ID="github-actions"
           PROVIDER_ID="github-oidc"
           POOL_RESOURCE="projects/${PROJECT_ID}/locations/global/workloadIdentityPools/${POOL_ID}"
           PROVIDER_RESOURCE="${POOL_RESOURCE}/providers/${PROVIDER_ID}"
 
-          IMPORT_ARGS="-var-file=environments/${{ inputs.environment }}.tfvars -var=backend_image=placeholder -var=frontend_image=placeholder"
+          IMPORT_ARGS="-var-file=environments/${{ inputs.environment }}.tfvars -var=project_id=${PROJECT_ID} -var=backend_image=placeholder -var=frontend_image=placeholder"
 
           # --- Pool ---
           if terraform state show google_iam_workload_identity_pool.github &>/dev/null; then
@@ -216,7 +214,7 @@ jobs:
           IMAGE=$(gcloud run services describe \
             "${APP}-frontend-${{ inputs.environment }}" \
             --region=${{ needs.setup.outputs.region }} \
-            --project=${{ needs.setup.outputs.project_id }} \
+            --project=${{ vars.GCP_PROJECT_ID }} \
             --format='value(spec.template.spec.containers[0].image)' 2>/dev/null \
             || echo "gcr.io/cloudrun/placeholder")
           echo "image=$IMAGE" >> $GITHUB_OUTPUT
@@ -232,6 +230,7 @@ jobs:
           # Add extra -var flags here for any application-specific secrets.
           terraform apply -auto-approve \
             -var-file="environments/${{ inputs.environment }}.tfvars" \
+            -var="project_id=${{ vars.GCP_PROJECT_ID }}" \
             -var="backend_image=${{ needs.build-backend.outputs.image }}" \
             -var="frontend_image=${{ steps.current-frontend.outputs.image }}" \
             $EXTRA
@@ -242,7 +241,7 @@ jobs:
         run: |
           DB_PASS=$(gcloud secrets versions access latest \
             --secret="db-password-${{ inputs.environment }}" \
-            --project="${{ needs.setup.outputs.project_id }}")
+            --project="${{ vars.GCP_PROJECT_ID }}")
           echo "::add-mask::$DB_PASS"
           echo "db_password=$DB_PASS" >> $GITHUB_OUTPUT
           echo "db_connection_name=$(terraform output -raw db_connection_name)" >> $GITHUB_OUTPUT
@@ -339,7 +338,7 @@ jobs:
         working-directory: terraform
         run: |
           terraform init \
-            -backend-config="bucket=${{ needs.setup.outputs.project_id }}-tf-state" \
+            -backend-config="bucket=${{ vars.GCP_PROJECT_ID }}-tf-state" \
             -backend-config="prefix=${{ needs.setup.outputs.app_name }}/${{ inputs.environment }}"
 
       - name: Terraform Apply
@@ -353,6 +352,7 @@ jobs:
           # Add extra -var flags here for any application-specific secrets.
           terraform apply -auto-approve \
             -var-file="environments/${{ inputs.environment }}.tfvars" \
+            -var="project_id=${{ vars.GCP_PROJECT_ID }}" \
             -var="backend_image=${{ needs.build-backend.outputs.image }}" \
             -var="frontend_image=${{ needs.build-frontend.outputs.image }}" \
             $EXTRA
