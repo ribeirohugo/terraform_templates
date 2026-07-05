@@ -1,0 +1,46 @@
+#!/bin/sh
+# Runs terraform fmt + tflint against any terraform_template directory
+# that has staged changes. Enable with:
+#   git config core.hooksPath .githooks
+
+set -e
+
+changed_dirs=$(git diff --cached --name-only --diff-filter=ACM \
+  | grep -E '/terraform_template/' \
+  | sed -E 's#(.*/terraform_template)/.*#\1#' \
+  | sort -u)
+
+if [ -z "$changed_dirs" ]; then
+  exit 0
+fi
+
+if ! command -v terraform >/dev/null 2>&1; then
+  echo "pre-commit: terraform not found in PATH" >&2
+  exit 1
+fi
+
+if ! command -v tflint >/dev/null 2>&1; then
+  echo "pre-commit: tflint not found in PATH" >&2
+  exit 1
+fi
+
+status=0
+
+for dir in $changed_dirs; do
+  echo "==> Checking $dir"
+
+  terraform fmt -check -recursive -diff "$dir" || status=1
+
+  (
+    cd "$dir"
+    tflint --init >/dev/null 2>&1
+    tflint --recursive
+  ) || status=1
+done
+
+if [ "$status" -ne 0 ]; then
+  echo ""
+  echo "pre-commit: terraform lint failed (try: terraform fmt -recursive <dir>, tflint --recursive --fix <dir>)" >&2
+fi
+
+exit $status

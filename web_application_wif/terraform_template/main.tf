@@ -181,7 +181,7 @@ resource "google_storage_bucket_iam_member" "cloud_run_storage" {
 # Secrets
 locals {
   db_name_safe = replace(var.db_name, "-", "_")
-  db_url        = "postgresql://app:${urlencode(random_password.db.result)}@/${local.db_name_safe}?host=/cloudsql/${google_sql_database_instance.main.connection_name}&schema=public"
+  db_url       = "postgresql://app:${urlencode(random_password.db.result)}@/${local.db_name_safe}?host=/cloudsql/${google_sql_database_instance.main.connection_name}&schema=public"
 }
 
 resource "google_secret_manager_secret" "db_password" {
