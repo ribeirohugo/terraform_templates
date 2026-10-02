@@ -1,0 +1,103 @@
+# One-time setup per environment: state bucket, APIs, WIF pool + provider, GitHub Actions SA roles, Artifact Registry.
+# Safe to re-run. Also re-run after destroy.yml, before the next deploy.
+name: Bootstrap
+run-name: Bootstrap ${{ inputs.environment }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [dev, prod]
+        default: dev
+
+jobs:
+  bootstrap:
+    name: Bootstrap Infrastructure
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: vars
+        run: |
+          TFVARS="terraform/environments/${{ inputs.environment }}.tfvars"
+          APP_NAME=$(grep '^app_name' $TFVARS | cut -d'"' -f2)
+          REGION=$(grep '^region' $TFVARS | cut -d'"' -f2)
+          echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
+          echo "region=$REGION" >> $GITHUB_OUTPUT
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9
+          terraform_wrapper: false
+
+      - name: Create State Bucket
+        run: |
+          BUCKET="gs://${{ vars.GCP_PROJECT_ID }}-tf-state"
+          if ! gcloud storage buckets describe "$BUCKET" --project=${{ vars.GCP_PROJECT_ID }} >/dev/null 2>&1; then
+            gcloud storage buckets create "$BUCKET" \
+              --project=${{ vars.GCP_PROJECT_ID }} \
+              --location=${{ steps.vars.outputs.region }} \
+              --uniform-bucket-level-access \
+              --public-access-prevention
+          fi
+          gcloud storage buckets update "$BUCKET" --versioning
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.GCP_PROJECT_ID }}-tf-state" \
+            -backend-config="prefix=${{ steps.vars.outputs.app_name }}/${{ inputs.environment }}"
+
+      - name: Import CI Identity
+        # The WIF pool, provider and SA were created manually so this workflow could authenticate —
+        # bring them under Terraform management. IAM member bindings need no import.
+        working-directory: terraform
+        run: |
+          PROJECT_ID="${{ vars.GCP_PROJECT_ID }}"
+          POOL="projects/${PROJECT_ID}/locations/global/workloadIdentityPools/github-actions"
+
+          import_if_missing() {
+            if ! terraform state list | grep -qx "$1"; then
+              terraform import \
+                -var-file="environments/${{ inputs.environment }}.tfvars" \
+                -var="project_id=${PROJECT_ID}" \
+                -var="github_repository=${{ github.repository }}" \
+                "$1" "$2"
+            fi
+          }
+
+          import_if_missing google_iam_workload_identity_pool.github "$POOL"
+          import_if_missing google_iam_workload_identity_pool_provider.github "${POOL}/providers/github-oidc"
+          import_if_missing google_service_account.github_actions \
+            "projects/${PROJECT_ID}/serviceAccounts/github-actions@${PROJECT_ID}.iam.gserviceaccount.com"
+
+      - name: Terraform Apply (Bootstrap)
+        working-directory: terraform
+        env:
+          TF_IN_AUTOMATION: "true"
+        run: |
+          terraform apply -auto-approve \
+            -target=google_project_service.apis \
+            -target=google_iam_workload_identity_pool.github \
+            -target=google_iam_workload_identity_pool_provider.github \
+            -target=google_service_account.github_actions \
+            -target=google_service_account_iam_member.github_wif \
+            -target=google_project_iam_member.github_actions \
+            -target=google_artifact_registry_repository.main \
+            -var-file="environments/${{ inputs.environment }}.tfvars" \
+            -var="project_id=${{ vars.GCP_PROJECT_ID }}" \
+            -var="github_repository=${{ github.repository }}"

@@ -51,4 +51,8 @@ Same GCP infrastructure as above plus GitHub Actions workflows, authenticated vi
 
 Same as `web_application_gcp_sa_key`, plus a **`bootstrap.yml` workflow** for first-time setup. It creates the versioned state bucket, enables APIs, imports the GitHub Actions SA and grants its roles, and creates the Artifact Registry. The Terraform is the same.
 
+### [`web_application_wif_bootstrap`](web_application_wif_bootstrap/README.md) — GCP Web App + CI/CD (Workload Identity Federation + Bootstrap)
+
+Same as `web_application_wif`, plus a **`bootstrap.yml` workflow** for first-time setup. It creates the versioned state bucket, enables APIs, imports the WIF pool, provider and GitHub Actions SA and grants its roles, and creates the Artifact Registry. `destroy.yml` keeps the CI identity so other environments keep working.
+
 Each template folder has its own `README.md` with setup instructions.
