@@ -47,4 +47,8 @@ Same GCP infrastructure as above plus GitHub Actions workflows, authenticated vi
 
 Same GCP infrastructure as above plus GitHub Actions workflows, authenticated via a **GCP Service Account JSON key** stored as a GitHub secret (`GCP_SA_KEY`). Simpler to set up, but requires managing key rotation.
 
+### [`web_application_gcp_sa_key_bootstrap`](web_application_gcp_sa_key_bootstrap/README.md) — GCP Web App + CI/CD (Service Account Key + Bootstrap)
+
+Same as `web_application_gcp_sa_key`, plus a **`bootstrap.yml` workflow** for first-time setup. It creates the versioned state bucket, enables APIs, imports the GitHub Actions SA and grants its roles, and creates the Artifact Registry. The Terraform is the same.
+
 Each template folder has its own `README.md` with setup instructions.

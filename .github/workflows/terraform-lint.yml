@@ -18,6 +18,7 @@ jobs:
       matrix:
         dir:
           - web_application_gcp_sa_key/terraform_template
+          - web_application_gcp_sa_key_bootstrap/terraform_template
           - web_application_wif/terraform_template
 
     steps:

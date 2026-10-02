@@ -15,7 +15,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-set dirs=web_application_gcp_sa_key\terraform_template web_application_wif\terraform_template
+set dirs=web_application_gcp_sa_key\terraform_template web_application_gcp_sa_key_bootstrap\terraform_template web_application_wif\terraform_template
 set status=0
 
 for %%d in (%dirs%) do (

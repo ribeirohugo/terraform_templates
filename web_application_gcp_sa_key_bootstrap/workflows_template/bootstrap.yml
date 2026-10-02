@@ -1,0 +1,86 @@
+# One-time setup per environment: state bucket, APIs, GitHub Actions SA roles, Artifact Registry.
+# Safe to re-run.
+name: Bootstrap
+run-name: Bootstrap ${{ inputs.environment }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [dev, prod]
+        default: dev
+
+jobs:
+  bootstrap:
+    name: Bootstrap Infrastructure
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: vars
+        run: |
+          TFVARS="terraform/environments/${{ inputs.environment }}.tfvars"
+          APP_NAME=$(grep '^app_name' $TFVARS | cut -d'"' -f2)
+          REGION=$(grep '^region' $TFVARS | cut -d'"' -f2)
+          echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
+          echo "region=$REGION" >> $GITHUB_OUTPUT
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9
+          terraform_wrapper: false
+
+      - name: Create State Bucket
+        run: |
+          BUCKET="gs://${{ vars.GCP_PROJECT_ID }}-tf-state"
+          if ! gcloud storage buckets describe "$BUCKET" --project=${{ vars.GCP_PROJECT_ID }} >/dev/null 2>&1; then
+            gcloud storage buckets create "$BUCKET" \
+              --project=${{ vars.GCP_PROJECT_ID }} \
+              --location=${{ steps.vars.outputs.region }} \
+              --uniform-bucket-level-access \
+              --public-access-prevention
+          fi
+          gcloud storage buckets update "$BUCKET" --versioning
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.GCP_PROJECT_ID }}-tf-state" \
+            -backend-config="prefix=${{ steps.vars.outputs.app_name }}/${{ inputs.environment }}"
+
+      - name: Import GitHub Actions Service Account
+        # The SA was created manually to obtain GCP_SA_KEY — bring it under Terraform management.
+        working-directory: terraform
+        run: |
+          if ! terraform state list | grep -q '^google_service_account.github_actions$'; then
+            terraform import \
+              -var-file="environments/${{ inputs.environment }}.tfvars" \
+              -var="project_id=${{ vars.GCP_PROJECT_ID }}" \
+              google_service_account.github_actions \
+              "projects/${{ vars.GCP_PROJECT_ID }}/serviceAccounts/github-actions@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
+          fi
+
+      - name: Terraform Apply (Bootstrap)
+        working-directory: terraform
+        env:
+          TF_IN_AUTOMATION: "true"
+        run: |
+          terraform apply -auto-approve \
+            -target=google_project_service.apis \
+            -target=google_service_account.github_actions \
+            -target=google_project_iam_member.github_actions \
+            -target=google_artifact_registry_repository.main \
+            -var-file="environments/${{ inputs.environment }}.tfvars" \
+            -var="project_id=${{ vars.GCP_PROJECT_ID }}"
